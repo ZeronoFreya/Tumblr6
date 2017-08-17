@@ -1,27 +1,16 @@
 import time
 import asyncio
-import redis
 
 now = lambda : time.time()
 
-def get_redis():
-    connection_pool = redis.ConnectionPool(host='127.0.0.1', db=3)
-    return redis.Redis(connection_pool=connection_pool)
 
-rcon = get_redis()
 
 async def worker():
     print('Start worker')
 
     while True:
         start = now()
-        task = rcon.rpop("queue")
-        if not task:
-            await asyncio.sleep(1)
-            continue
-        print('Wait ', int(task))
-        await asyncio.sleep(int(task))
-        print('Done ', task, now() - start)
+        await asyncio.sleep(1)
 
 def main():
     asyncio.ensure_future(worker())
