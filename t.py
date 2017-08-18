@@ -8,24 +8,19 @@ def startServiceP(cfg, _GuiRecvMsg, _CtrlRecvMsg):
     async def eventLoop( _CtrlRecvMsg, handlers, funMap ):
         print('eventLoop')
         while 1:
-
             print('i')
-            try:
-                # 获取事件的阻塞时间设为1秒
-                # await asyncio.sleep(1)
-                event = await _CtrlRecvMsg.get(timeout = 1)
-                print(event['type_'], event['event_'])
-                if event['type_'] == 'sys' and event['event_'] == 'close_app':
-                    break
-                # if event['type_'] in handlers:
-                    # getattr(funMap, '__'.join((event['type_'], event['event_'])))( event.get('data_',None) )
-            except Exception as e:
-                pass
+            # 获取事件的阻塞时间设为1秒
+            # await asyncio.sleep(1)
+            event = await _CtrlRecvMsg.get()
+            print(event['type_'], event['event_'])
+            # break
     async def downloadLoop(_CtrlRecvMsg, handlers, funMap):
         print('downloadLoop')
         while 1:
             print('d')
-            event = await _CtrlRecvMsg.get(timeout = 1)
+            event = await _CtrlRecvMsg.get()
+            print(event['type_'], event['event_'])
+            # break
         
 
     # funMap = ServiceEvent( cfg, _GuiRecvMsg )
