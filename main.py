@@ -2,7 +2,6 @@
 import limp
 import sciter
 import ctypes
-import asyncio
 # import json
 from multiprocessing import Process,Queue
 from threading import Thread
@@ -15,32 +14,9 @@ from FunManager import ServiceEvent, GuiCallBack
 ctypes.windll.user32.SetProcessDPIAware(2)
 
 def startServiceP(cfg, _GuiRecvMsg, _CtrlRecvMsg):
-    print('startServiceP')
-    async def eventLoop( _CtrlRecvMsg, handlers, funMap ):
-        while 1:
-            try:
-                # 获取事件的阻塞时间设为1秒
-                event = await _CtrlRecvMsg.get(timeout = 1)
-                print(event['type_'], event['event_'])
-                if event['type_'] == 'sys' and event['event_'] == 'close_app':
-                    break
-                if event['type_'] in handlers:
-                    getattr(funMap, '__'.join((event['type_'], event['event_'])))( event.get('data_',None) )
-            except Exception as e:
-                pass
-    async def downloadLoop():
-        await asyncio.sleep(1)
-
     funMap = ServiceEvent( cfg, _GuiRecvMsg )
     handlers = ['tumblr', 'sys']
-
-    asyncio.ensure_future(eventLoop(_CtrlRecvMsg, handlers, funMap))
-    asyncio.ensure_future(downloadLoop())
-    # EventManager( _CtrlRecvMsg, handlers, funMap ).Start()
-    # loop = asyncio.new_event_loop()
-    loop = asyncio.get_event_loop()
-    # asyncio.set_event_loop(loop)
-    loop.run_forever()
+    EventManager( _CtrlRecvMsg, handlers, funMap ).Start()
 
 def queueLoop( _GuiRecvMsg, funCall ):
     guiCallBack = GuiCallBack( funCall )
@@ -88,7 +64,6 @@ class Frame(sciter.Window):
         return cfg
 
     def signal(self, t, e, d = None):
-        print('signal',t,e)
         '''接收界面事件并转发'''
         self.CtrlRecvMsg.put({
             'type_' : str(t).strip('"'),

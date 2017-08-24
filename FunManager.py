@@ -1,7 +1,6 @@
-# from multiprocessing import Queue
-# import TumblrManager
-import aiohttp
+import limp
 import asyncio
+import aiohttp
 from time import time
 from threading import Thread
 from os import path as osPath
@@ -9,17 +8,22 @@ from tumblpy import Tumblpy
 from json import load as JLoad
 from common import gets
 
-class download():
-    """docstring for download"""
-    def __init__(self, proxies, _GuiRecvMsg, loop=None):
+class AsyncioDownload(object):
+    '''使用协程下载图片'''
+    def __init__(self, loop, _GuiRecvMsg, proxies=None ):
         self.GuiRecvMsg = _GuiRecvMsg
-        # conn = aiohttp.ProxyConnector( proxy=''.join(('http://', proxies)) )
         self._session = None
         self.loop = loop
-        self.prox = ''.join(('http://', proxies))
+        self.prox = ''.join(('http://', proxies)) if proxies else proxies
         self.timeout = 10
-        # asyncio.set_event_loop(self.loop)
-        # loop.run_forever()
+        t = Thread(target=self.start_loop, args=(self.loop,))
+        t.setDaemon(True)    # 设置子线程为守护线程
+        t.start()
+
+    def start_loop(self, loop):
+        # self.sem = asyncio.Semaphore(30)
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
 
     def __session(self):
         if self._session is None:
@@ -29,7 +33,7 @@ class download():
     async def stream_download(self, d, _GuiRecvMsgDict, _Timeout):
         try:
             client = self.__session()
-            async with client.get( d['http'], proxy=self.prox, timeout=self.timeout ) as response:
+            async with client.get( d['http'], proxy=self.prox, timeout=self.timeout) as response:
                 if response.status != 200:
                     print('error')
                     self.GuiRecvMsg.put(_Timeout)
@@ -40,44 +44,16 @@ class download():
                         while True:
                             chunk = await response.content.read(1024)
                             if not chunk:
-                                self.GuiRecvMsg.put(_Timeout)
-                                return
+                                break
                             file.write(chunk)
                 self.GuiRecvMsg.put(_GuiRecvMsgDict)
-                return
         except asyncio.TimeoutError:
             # continue
             self.GuiRecvMsg.put(_Timeout)
-
-async def stream_download( d, proxies, _GuiRecvMsg, _GuiRecvMsgDict, _Timeout ):
-    '''协程下载列表中图片'''
-    print('下载',d['http'])
-    try:
-        with aiohttp.Timeout(10):
-            async with aiohttp.request( 'GET', d['http'], proxy=''.join(('http://', proxies)) ) as response:
-            # async with client.get( d['http'], proxy=''.join(('http://', proxies)), timeout=10 ) as response:
-                if response.status != 200:
-                    print('error')
-                    _GuiRecvMsg.put(_Timeout)
-                    return
-                print('200',d['id'])
-                if not osPath.isfile(d['fpath']):
-                    with open(d['fpath'], 'ab') as file:
-                        while True:
-                            chunk = await response.content.read(1024)
-                            if not chunk:
-                                break
-                            file.write(chunk)
-        _GuiRecvMsg.put(_GuiRecvMsgDict)
-        return
-    except asyncio.TimeoutError:
-        # continue
-        _GuiRecvMsg.put(_Timeout)
-    # finally:
-    #     print(err, d['id'])
+            pass
 
 class ServiceEvent(object):
-    """docstring for ClassName"""
+    '''服务进程'''
     def __init__(self, cfg, _GuiRecvMsg):
         self.GuiRecvMsg = _GuiRecvMsg
         self.cfg = cfg['tumblr']
@@ -92,16 +68,15 @@ class ServiceEvent(object):
                 <div.imgtype></div>
             </li>
         '''
-        # self.new_loop = asyncio.new_event_loop()
-        # t = Thread(target=self.start_loop, args=(self.proxies, self.GuiRecvMsg, self.new_loop))
-        # t.setDaemon(True)    # 设置子线程为守护线程
-        # t.start()
+        self.new_loop = asyncio.new_event_loop()
+        self.dld = AsyncioDownload(self.new_loop, self.GuiRecvMsg, self.proxies )
 
-    def start_loop(self, prox, _GuiRecvMsg, loop):
-        # self.sem = asyncio.Semaphore(30)
-        asyncio.set_event_loop(loop)
-        self.dld = download( prox, _GuiRecvMsg, loop )
-        loop.run_forever()
+    def __run_coroutine_threadsafe(self, data, _GuiRecvMsgDict, _Timeout):
+        asyncio.run_coroutine_threadsafe(self.dld.stream_download(
+            data,
+            _GuiRecvMsgDict,
+            _Timeout
+        ), self.new_loop)
 
     def tumblr__init(self, data_=None):
         print('initTumblr')
@@ -136,13 +111,11 @@ class ServiceEvent(object):
             }
         }
         if not osPath.isfile(file_path):
-            asyncio.run_coroutine_threadsafe(self.dld.stream_download(
+            self.__run_coroutine_threadsafe(
                 {'id': d['id'],'http': d['download'],'fpath': file_path},
-                self.proxies,
-                self.GuiRecvMsg,
                 _GuiRecvMsgDict,
                 _Timeout
-            ), self.new_loop)
+            )
         else:
             self.GuiRecvMsg.put(_GuiRecvMsgDict)
 
@@ -174,13 +147,11 @@ class ServiceEvent(object):
                 'event_' : 'timeout',
                 'data_' : {'id':d['id'],'http':d['preview_size'],'module':'"'.join(('#tumblr .list li[imgid=',d['id'],']'))}
             }
-            asyncio.run_coroutine_threadsafe(self.dld.stream_download(
+            self.__run_coroutine_threadsafe(
                 {'id': d['id'],'http': d['preview_size'],'fpath': file_path},
-                self.proxies,
-                self.GuiRecvMsg,
                 _GuiRecvMsgDict,
                 _Timeout
-            ), self.new_loop)
+            )
         else:
             self.GuiRecvMsg.put(_GuiRecvMsgDict)
 
@@ -199,13 +170,11 @@ class ServiceEvent(object):
             'event_' : 'timeout',
             'data_' : {'id':d['id'],'http':d['alt_size'],'module':'"'.join(('#tumblr .view li[imgid=',d['id'],']'))}
         }
-        asyncio.run_coroutine_threadsafe(self.dld.stream_download(
+        self.__run_coroutine_threadsafe(
             {'id': d['id'],'http': d['alt_size'],'fpath': file_path},
-            self.proxies,
-            self.GuiRecvMsg,
             _GuiRecvMsgDict,
             _Timeout
-        ), self.new_loop)
+        )
 
     def __tumblr__getImgList(self):
         ''' 获取图片列表
@@ -228,8 +197,8 @@ class ServiceEvent(object):
         #     raise 'not dashboard'
         #     return
         try:
-            # dashboard = self.tumblr.dashboard( p )
-            dashboard = self.tumblr.posts('kuvshinov-ilya.tumblr.com', None, p)
+            dashboard = self.tumblr.dashboard( p )
+            # dashboard = self.tumblr.posts('kuvshinov-ilya.tumblr.com', None, p)
             # # print('dashboard',dashboard)
         except Exception as e:
             print('err dashboard')
@@ -304,13 +273,11 @@ class ServiceEvent(object):
                 'data_' : {'id':d['id'],'http':d['alt_sizes'],'module':'"'.join(('#tumblr .view li[imgid=',d['id'],']'))}
             }
             if not osPath.isfile(file_path):
-                asyncio.run_coroutine_threadsafe(self.dld.stream_download(
+                self.__run_coroutine_threadsafe(
                     {'id': d['id'],'http': d['alt_sizes'],'fpath': file_path},
-                    self.proxies,
-                    self.GuiRecvMsg,
                     _GuiRecvMsgDict,
                     _Timeout
-                ), self.new_loop)
+                )
             else:
                 self.GuiRecvMsg.put(_GuiRecvMsgDict)
 
